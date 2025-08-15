@@ -392,7 +392,7 @@ export default function LeadsPage() {
                 Suas Prospecções
               </h1>
               <p className="text-lg text-gray-600">
-                Visualize todos os eventos prospectados no Sympla
+                Visualize todos os eventos prospectados no Sympla e Eventbrite
               </p>
             </div>
 
@@ -672,7 +672,7 @@ export default function LeadsPage() {
                             className="inline-flex items-center text-sm text-purple-600 hover:text-purple-700 font-medium"
                           >
                             <ExternalLink className="h-4 w-4 mr-1" />
-                            Ver no Sympla
+                            {lead.sympla_url.includes('eventbrite') ? 'Ver no Eventbrite' : 'Ver no Sympla'}
                           </a>
                         </div>
 

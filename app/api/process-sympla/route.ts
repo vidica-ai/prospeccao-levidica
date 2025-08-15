@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@supabase/supabase-js'
 import OpenAI from 'openai'
 import { chromium } from 'playwright'
+import { EventbriteScraper } from '@/lib/eventbrite-scraper'
 
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -24,18 +25,24 @@ interface EventData {
   local: string
   produtor: string
   sympla_url: string
+  eventbrite_url?: string
+  website?: string
+  organizer_name?: string
 }
 
 // Create complete lead using the database function
 async function createCompleteLeadWithFallback(eventData: EventData, userId: string): Promise<{ data: string | null; error: any }> {
   // Try to use the database function first
+  const eventUrl = eventData.sympla_url || eventData.eventbrite_url || ''
+  const organizerName = eventData.organizer_name || eventData.produtor
+  
   const { data, error } = await supabase.rpc('create_complete_lead', {
     p_nome_evento: eventData.nome_evento,
     p_data_evento: eventData.data_evento,
     p_local: eventData.local,
-    p_sympla_url: eventData.sympla_url,
-    p_organizer_name: eventData.produtor,
-    p_organizer_website: null,
+    p_sympla_url: eventUrl,
+    p_organizer_name: organizerName,
+    p_organizer_website: eventData.website || null,
     p_contact_name: null,
     p_contact_email: null,
     p_contact_position: null,
@@ -52,8 +59,8 @@ async function createCompleteLeadWithFallback(eventData: EventData, userId: stri
   try {
     // Get or create organizer
     const { data: organizerId, error: organizerError } = await supabase.rpc('get_or_create_organizer', {
-      p_name: eventData.produtor,
-      p_website: null,
+      p_name: organizerName,
+      p_website: eventData.website || null,
       p_user_id: userId
     })
 
@@ -68,7 +75,7 @@ async function createCompleteLeadWithFallback(eventData: EventData, userId: stri
         nome_evento: eventData.nome_evento,
         data_evento: eventData.data_evento,
         local: eventData.local,
-        sympla_url: eventData.sympla_url,
+        sympla_url: eventUrl,
         organizer_id: organizerId,
         user_id: userId
       }])
@@ -325,6 +332,50 @@ ${htmlContent.substring(0, 50000)}
   }
 }
 
+async function extractEventDataFromEventbrite(url: string): Promise<EventData | null> {
+  try {
+    console.log(`Extracting Eventbrite data from: ${url}`)
+    
+    const eventbriteData = await EventbriteScraper.fetchEventData(url)
+    
+    // Convert Eventbrite data to our EventData format
+    const eventData: EventData = {
+      nome_evento: eventbriteData.nome_evento,
+      data_evento: eventbriteData.data_evento,
+      local: eventbriteData.local,
+      produtor: eventbriteData.organizer_name,
+      sympla_url: '', // Will be set to eventbrite_url
+      eventbrite_url: eventbriteData.eventbrite_url,
+      website: eventbriteData.website,
+      organizer_name: eventbriteData.organizer_name
+    }
+    
+    return eventData
+    
+  } catch (error) {
+    console.error('Error extracting Eventbrite data:', error)
+    return null
+  }
+}
+
+function isEventbriteUrl(url: string): boolean {
+  try {
+    const urlObj = new URL(url)
+    return urlObj.hostname.includes('eventbrite.com') || urlObj.hostname.includes('eventbrite.co.uk')
+  } catch {
+    return false
+  }
+}
+
+function isSymplaUrl(url: string): boolean {
+  try {
+    const urlObj = new URL(url)
+    return urlObj.hostname.includes('sympla.com.br')
+  } catch {
+    return false
+  }
+}
+
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json()
@@ -353,9 +404,12 @@ export async function POST(request: NextRequest) {
       
       if (!trimmedLink) continue
       
-      // Validate Sympla URL
-      if (!trimmedLink.includes('sympla.com.br')) {
-        errors.push(`Invalid Sympla URL: ${trimmedLink}`)
+      // Validate URL (Sympla or Eventbrite)
+      const isSympa = isSymplaUrl(trimmedLink)
+      const isEventbrite = isEventbriteUrl(trimmedLink)
+      
+      if (!isSympa && !isEventbrite) {
+        errors.push(`Invalid URL (must be Sympla or Eventbrite): ${trimmedLink}`)
         continue
       }
 
@@ -373,8 +427,14 @@ export async function POST(request: NextRequest) {
           continue
         }
 
-        // Extract event data
-        const eventData = await extractEventDataFromSymplaPage(trimmedLink)
+        // Extract event data based on platform
+        let eventData: EventData | null = null
+        
+        if (isSympa) {
+          eventData = await extractEventDataFromSymplaPage(trimmedLink)
+        } else if (isEventbrite) {
+          eventData = await extractEventDataFromEventbrite(trimmedLink)
+        }
         
         if (!eventData) {
           errors.push(`Failed to extract data from: ${trimmedLink}`)

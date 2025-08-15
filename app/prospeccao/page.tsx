@@ -38,7 +38,7 @@ export default function ProspeccaoPage() {
         .filter(link => link.length > 0)
 
       if (links.length === 0) {
-        setError('Por favor, cole pelo menos um link do Sympla.')
+        setError('Por favor, cole pelo menos um link do Sympla ou Eventbrite.')
         setIsProcessing(false)
         return
       }
@@ -115,7 +115,7 @@ export default function ProspeccaoPage() {
               </h2>
               
               <p className="text-lg text-gray-600 mb-12 max-w-2xl mx-auto">
-                Cole links de eventos no Sympla e separe por linhas para análise e prospecção.
+                Cole links de eventos do Sympla ou Eventbrite e separe por linhas para análise e prospecção.
               </p>
               
               {/* Text Input Area */}
@@ -124,7 +124,7 @@ export default function ProspeccaoPage() {
                   <textarea
                     value={prospectingText}
                     onChange={handleTextChange}
-                    placeholder="Cole os links dos eventos do Sympla aqui, um por linha..."
+                    placeholder="Cole os links dos eventos do Sympla ou Eventbrite aqui, um por linha..."
                     className="w-full h-64 px-6 py-4 text-lg text-gray-900 border-2 border-gray-200 rounded-2xl focus:border-purple-500 focus:ring-2 focus:ring-purple-200 outline-none transition-all duration-200 resize-none"
                     maxLength={2000}
                   />
