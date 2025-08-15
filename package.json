@@ -1,0 +1,35 @@
+{
+  "name": "prospeccao-levidica",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start",
+    "lint": "next lint",
+    "create-user": "node scripts/create-levidica-user.js",
+    "verify-user": "node scripts/verify-user.js",
+    "setup-leads": "node scripts/setup-leads-table.js"
+  },
+  "dependencies": {
+    "@supabase/supabase-js": "^2.38.4",
+    "dotenv": "^17.2.1",
+    "lucide-react": "^0.292.0",
+    "next": "^14.2.31",
+    "openai": "^5.12.2",
+    "playwright": "^1.54.2",
+    "react": "^18",
+    "react-dom": "^18"
+  },
+  "devDependencies": {
+    "@types/node": "^20",
+    "@types/react": "^18",
+    "@types/react-dom": "^18",
+    "autoprefixer": "^10.4.16",
+    "eslint": "^8",
+    "eslint-config-next": "14.0.3",
+    "postcss": "^8.4.31",
+    "tailwindcss": "^3.3.0",
+    "typescript": "^5"
+  }
+}
