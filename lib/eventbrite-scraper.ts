@@ -21,6 +21,8 @@ export class EventbriteScraper {
         throw new Error('Invalid Eventbrite URL')
       }
 
+      console.log(`[EventbriteScraper] Fetching data from: ${url}`)
+
       // Fetch the page content
       const response = await fetch(url, {
         headers: {
@@ -35,14 +37,32 @@ export class EventbriteScraper {
       const html = await response.text()
       const $ = cheerio.load(html)
 
+      console.log(`[EventbriteScraper] Page content loaded, length: ${html.length} chars`)
+
       // Extract structured data from JSON-LD if available
       const jsonLdData = this.extractJsonLdData($)
       if (jsonLdData) {
-        return this.parseJsonLdData(jsonLdData, url)
+        console.log('[EventbriteScraper] Using JSON-LD structured data')
+        const result = this.parseJsonLdData(jsonLdData, url)
+        console.log('[EventbriteScraper] Extracted data:', {
+          event: result.nome_evento,
+          location: result.local,
+          organizer: result.organizer_name,
+          date: result.data_evento
+        })
+        return result
       }
 
+      console.log('[EventbriteScraper] No JSON-LD found, falling back to HTML scraping')
       // Fallback to HTML scraping
-      return this.scrapeHtmlData($, url)
+      const result = this.scrapeHtmlData($, url)
+      console.log('[EventbriteScraper] Extracted data:', {
+        event: result.nome_evento,
+        location: result.local,
+        organizer: result.organizer_name,
+        date: result.data_evento
+      })
+      return result
 
     } catch (error) {
       console.error('Error scraping Eventbrite event:', error)
@@ -84,33 +104,73 @@ export class EventbriteScraper {
     const startDate = jsonData.startDate ? new Date(jsonData.startDate) : null
     const endDate = jsonData.endDate ? new Date(jsonData.endDate) : null
     
-    // Extract location information
-    let location = 'Online Event'
+    // Extract location information - prioritize venue name
+    let location = 'Local não informado'
     if (jsonData.location) {
       if (typeof jsonData.location === 'string') {
         location = jsonData.location
       } else if (jsonData.location.name) {
+        // Use venue name as primary location (e.g., "Renaissance São Paulo Hotel")
         location = jsonData.location.name
+        
+        // Optionally add city/state if venue name doesn't include it
         if (jsonData.location.address) {
-          const address = typeof jsonData.location.address === 'string' 
-            ? jsonData.location.address 
-            : `${jsonData.location.address.streetAddress || ''}, ${jsonData.location.address.addressLocality || ''}, ${jsonData.location.address.addressRegion || ''}`
-          location += `, ${address}`
+          const address = jsonData.location.address
+          const locality = address.addressLocality || ''
+          const region = address.addressRegion || ''
+          
+          // Only add city/state if venue name doesn't already contain location info
+          if (locality && !location.toLowerCase().includes(locality.toLowerCase())) {
+            location += `, ${locality}`
+            if (region && region !== locality) {
+              location += `, ${region}`
+            }
+          }
+        }
+      } else if (jsonData.location.address) {
+        // Fallback to address if no venue name
+        const address = jsonData.location.address
+        if (typeof address === 'string') {
+          location = address
+        } else {
+          const parts = [
+            address.streetAddress,
+            address.addressLocality,
+            address.addressRegion
+          ].filter(Boolean)
+          location = parts.join(', ')
         }
       }
     }
 
     // Extract organizer information
-    let organizerName = 'Unknown Organizer'
+    let organizerName = 'Organizador não informado'
     let organizerWebsite = undefined
     
     if (jsonData.organizer) {
       if (typeof jsonData.organizer === 'string') {
         organizerName = jsonData.organizer
+      } else if (Array.isArray(jsonData.organizer)) {
+        // Sometimes organizer is an array, take the first one
+        const firstOrganizer = jsonData.organizer[0]
+        if (typeof firstOrganizer === 'string') {
+          organizerName = firstOrganizer
+        } else if (firstOrganizer.name) {
+          organizerName = firstOrganizer.name
+          organizerWebsite = firstOrganizer.url || firstOrganizer.sameAs?.[0]
+        }
       } else if (jsonData.organizer.name) {
         organizerName = jsonData.organizer.name
         organizerWebsite = jsonData.organizer.url || jsonData.organizer.sameAs?.[0]
       }
+    }
+    
+    // Clean organizer name
+    if (organizerName) {
+      organizerName = organizerName
+        .replace(/^(by\s+|organizado por\s+|organized by\s+)/i, '')
+        .replace(/\s+presents?$/i, '')
+        .trim()
     }
 
     return {
@@ -130,36 +190,98 @@ export class EventbriteScraper {
   private static scrapeHtmlData($: cheerio.CheerioAPI, url: string): EventbriteEventData {
     // Extract event title
     const eventTitle = $('h1[data-automation="event-title"]').text().trim() ||
-                      $('.event-title').text().trim() ||
+                      $('.eds-event-title').text().trim() ||
                       $('h1').first().text().trim() ||
                       'Unnamed Event'
 
-    // Extract event date
-    const dateElement = $('[data-automation="event-date-time"]').text().trim() ||
+    // Extract event date - look for Eventbrite's specific date selectors
+    const dateElement = $('.eds-event-date-details').text().trim() ||
+                       $('[data-automation="event-date-time"]').text().trim() ||
                        $('.event-date').text().trim() ||
                        $('[class*="date"]').first().text().trim()
     
-    // Extract location
-    const locationElement = $('[data-automation="event-location"]').text().trim() ||
-                           $('.event-location').text().trim() ||
-                           $('[class*="location"]').first().text().trim() ||
-                           'Local não informado'
+    // Extract location - improved to find venue name specifically
+    let locationElement = ''
+    
+    // First try to find location section with "Location" header
+    const locationSection = $('h3').filter((i, el) => $(el).text().toLowerCase().includes('location')).next()
+    if (locationSection.length > 0) {
+      locationElement = locationSection.text().trim()
+    }
+    
+    // Alternative selectors for location
+    if (!locationElement) {
+      locationElement = $('[data-automation="event-location"]').text().trim() ||
+                       $('.eds-text--left').filter((i, el) => {
+                         const text = $(el).text()
+                         return text.includes('Hotel') || text.includes('Centro') || text.includes('Alameda') || text.includes('Rua')
+                       }).first().text().trim() ||
+                       $('.event-location').text().trim() ||
+                       'Local não informado'
+    }
 
-    // Extract organizer name - this might be tricky on Eventbrite
-    const organizerElement = $('.organizer-name').text().trim() ||
-                            $('[data-automation="organizer-name"]').text().trim() ||
-                            $('.event-organizer').text().trim() ||
-                            'Organizador não informado'
+    // Extract organizer name - look for "Organized by" section
+    let organizerElement = ''
+    
+    // Look for "Organized by" text and get the following element
+    const organizedBySection = $('*').filter((i, el) => {
+      const text = $(el).text().toLowerCase()
+      return text.includes('organized by') || text.includes('organizado por')
+    })
+    
+    if (organizedBySection.length > 0) {
+      // Try to find the organizer name in nearby elements
+      const organizerCandidate = organizedBySection.next().text().trim() ||
+                                organizedBySection.parent().find('.eds-text-color--primary-brand').text().trim() ||
+                                organizedBySection.siblings().first().text().trim()
+      if (organizerCandidate && organizerCandidate.length < 100) { // Reasonable length check
+        organizerElement = organizerCandidate
+      }
+    }
+    
+    // Alternative selectors for organizer
+    if (!organizerElement) {
+      organizerElement = $('.eds-text-color--primary-brand').text().trim() ||
+                        $('.organizer-name').text().trim() ||
+                        $('[data-automation="organizer-name"]').text().trim() ||
+                        $('.event-organizer').text().trim()
+    }
+    
+    // Clean up organizer name - remove common prefixes/suffixes
+    if (organizerElement) {
+      organizerElement = organizerElement
+        .replace(/^(by\s+|organizado por\s+|organized by\s+)/i, '')
+        .replace(/\s+presents?$/i, '')
+        .trim()
+    }
+    
+    if (!organizerElement) {
+      organizerElement = 'Organizador não informado'
+    }
 
     // Extract description
     const description = $('.event-description').text().trim() ||
                        $('[data-automation="event-description"]').text().trim() ||
+                       $('.eds-text--left').filter((i, el) => {
+                         const text = $(el).text()
+                         return text.length > 50 && text.length < 1000 // Reasonable description length
+                       }).first().text().trim() ||
                        $('.description').text().trim()
+
+    // Clean location text - extract just the venue name if it's too long
+    let cleanLocation = locationElement
+    if (cleanLocation.length > 100) {
+      // Try to extract just the venue name (usually the first line or before the address)
+      const lines = cleanLocation.split('\n').map(line => line.trim()).filter(line => line.length > 0)
+      if (lines.length > 0) {
+        cleanLocation = lines[0] // Take the first line which is usually the venue name
+      }
+    }
 
     return {
       nome_evento: eventTitle,
       data_evento: this.parseHtmlDate(dateElement),
-      local: locationElement,
+      local: cleanLocation || 'Local não informado',
       organizer_name: organizerElement,
       eventbrite_url: url,
       description: description || undefined
