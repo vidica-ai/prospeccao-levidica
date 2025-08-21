@@ -1,6 +1,8 @@
 'use client'
 
 import React, { useState } from 'react'
+
+export const dynamic = 'force-dynamic'
 import { useAuth } from '@/lib/auth-context'
 import { ArrowLeft, Search, Loader2, CheckCircle, AlertCircle } from 'lucide-react'
 import { useRouter } from 'next/navigation'

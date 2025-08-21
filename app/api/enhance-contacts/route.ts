@@ -1,6 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@supabase/supabase-js'
 
+// Force dynamic rendering
+export const dynamic = 'force-dynamic'
+
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
   process.env.SUPABASE_SERVICE_ROLE_KEY!
@@ -279,8 +282,9 @@ export async function POST(request: NextRequest) {
             // Update existing contact with additional information if available
             if (contact.name || contact.position) {
               const updateData: any = {}
-              if (contact.name && !existingContact.name) updateData.name = contact.name
-              if (contact.position && !existingContact.position) updateData.position = contact.position
+              const existingContactData = existingContact as any
+              if (contact.name && !existingContactData.name) updateData.name = contact.name
+              if (contact.position && !existingContactData.position) updateData.position = contact.position
               
               if (Object.keys(updateData).length > 0) {
                 await supabase

@@ -1,5 +1,6 @@
 // Test script for email generation API
-import fetch from 'node-fetch'
+// @ts-nocheck
+const fetch = typeof window !== 'undefined' ? window.fetch : require('node-fetch')
 
 const TEST_USER_ID = 'test-user-123'
 const API_BASE = 'http://localhost:3000'

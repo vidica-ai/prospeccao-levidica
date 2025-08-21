@@ -1,5 +1,7 @@
 'use client'
 
+export const dynamic = 'force-dynamic'
+
 import { useAuth } from '@/lib/auth-context'
 import LoginForm from '@/components/login-form'
 import WelcomePage from '@/components/welcome-page'
