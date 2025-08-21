@@ -9,8 +9,15 @@ const supabase = createClient(
 // Hunter.io API configuration
 const HUNTER_API_KEY = process.env.HUNTER_API_KEY!
 
+interface ContactInfo {
+  email: string
+  name?: string
+  position?: string
+  confidence?: number
+}
+
 interface ContactSearchResult {
-  email?: string
+  contacts: ContactInfo[]
   website?: string
   success: boolean
   error?: string
@@ -60,7 +67,7 @@ async function searchGoogleForWebsite(companyName: string): Promise<string | nul
   }
 }
 
-async function searchHunterIO(domain: string): Promise<{ emails: string[], website: string }> {
+async function searchHunterIO(domain: string): Promise<{ contacts: ContactInfo[], website: string }> {
   try {
     const response = await fetch(
       `https://api.hunter.io/v2/domain-search?domain=${domain}&api_key=${HUNTER_API_KEY}&limit=10`,
@@ -79,18 +86,25 @@ async function searchHunterIO(domain: string): Promise<{ emails: string[], websi
     const data = await response.json()
     
     if (data.data && data.data.emails) {
-      const emails = data.data.emails
-        .filter((email: any) => email.value && email.confidence > 50)
-        .map((email: any) => email.value)
-        .slice(0, 3) // Get top 3 emails
+      const contacts = data.data.emails
+        .filter((email: any) => email.value && email.confidence > 40) // Lower threshold to get more contacts
+        .map((email: any) => ({
+          email: email.value,
+          name: email.first_name && email.last_name 
+            ? `${email.first_name} ${email.last_name}` 
+            : email.first_name || email.last_name || undefined,
+          position: email.position || email.department || undefined,
+          confidence: email.confidence
+        }))
+        .slice(0, 5) // Get top 5 contacts
       
       return {
-        emails,
+        contacts,
         website: `https://${domain}`
       }
     }
 
-    return { emails: [], website: `https://${domain}` }
+    return { contacts: [], website: `https://${domain}` }
   } catch (error) {
     console.error('Hunter.io search error:', error)
     throw error
@@ -105,6 +119,7 @@ async function findContactInfo(companyName: string): Promise<ContactSearchResult
     
     if (!website) {
       return {
+        contacts: [],
         success: false,
         error: 'Website not found'
       }
@@ -112,12 +127,14 @@ async function findContactInfo(companyName: string): Promise<ContactSearchResult
 
     console.log(`Found website: ${website}`)
 
-    // Step 2: Search Hunter.io for emails
+    // Step 2: Search Hunter.io for contacts
     const domain = website.replace(/^https?:\/\/(www\.)?/, '')
     const hunterResult = await searchHunterIO(domain)
 
+    console.log(`Found ${hunterResult.contacts.length} contacts for ${companyName}`)
+
     return {
-      email: hunterResult.emails[0] || undefined, // Get the first/best email
+      contacts: hunterResult.contacts,
       website: hunterResult.website,
       success: true
     }
@@ -125,6 +142,7 @@ async function findContactInfo(companyName: string): Promise<ContactSearchResult
   } catch (error) {
     console.error('Contact search error:', error)
     return {
+      contacts: [],
       success: false,
       error: error instanceof Error ? error.message : 'Unknown error'
     }
@@ -204,7 +222,7 @@ export async function POST(request: NextRequest) {
       })
     }
 
-    const foundEmail = contactResult.email
+    const foundContacts = contactResult.contacts
     const foundWebsite = contactResult.website
     const searchDomain = foundWebsite ? foundWebsite.replace(/^https?:\/\/(www\.)?/, '') : null
 
@@ -224,41 +242,73 @@ export async function POST(request: NextRequest) {
       }
     }
 
-    // Create contact if email found
-    if (foundEmail) {
-      try {
-        // Check if contact with this email already exists
-        const { data: existingContact } = await supabase
-          .from('contact')
-          .select('contact_id')
-          .eq('organizer_id', lead.organizer_id)
-          .eq('email', foundEmail)
-          .single()
-
-        if (!existingContact) {
-          // Create new contact
-          await supabase
+    // Create contacts if found
+    let contactsCreated = 0
+    if (foundContacts.length > 0) {
+      console.log(`Processing ${foundContacts.length} contacts for organizer ${lead.organizer_id}`)
+      
+      for (const contact of foundContacts) {
+        try {
+          // Check if contact with this email already exists
+          const { data: existingContact } = await supabase
             .from('contact')
-            .insert([{
-              organizer_id: lead.organizer_id,
-              name: null,
-              email: foundEmail,
-              position: null,
-              user_id: userId
-            }])
+            .select('contact_id')
+            .eq('organizer_id', lead.organizer_id)
+            .eq('email', contact.email)
+            .single()
+
+          if (!existingContact) {
+            // Create new contact with all available information
+            const { error: insertError } = await supabase
+              .from('contact')
+              .insert([{
+                organizer_id: lead.organizer_id,
+                name: contact.name || null,
+                email: contact.email,
+                position: contact.position || null,
+                user_id: userId
+              }])
+            
+            if (!insertError) {
+              contactsCreated++
+              console.log(`Created contact: ${contact.email} (${contact.name || 'No name'}, ${contact.position || 'No position'})`)
+            } else {
+              console.error(`Error inserting contact ${contact.email}:`, insertError)
+            }
+          } else {
+            // Update existing contact with additional information if available
+            if (contact.name || contact.position) {
+              const updateData: any = {}
+              if (contact.name && !existingContact.name) updateData.name = contact.name
+              if (contact.position && !existingContact.position) updateData.position = contact.position
+              
+              if (Object.keys(updateData).length > 0) {
+                await supabase
+                  .from('contact')
+                  .update(updateData)
+                  .eq('contact_id', existingContact.contact_id)
+                console.log(`Updated existing contact ${contact.email} with additional info`)
+              }
+            }
+          }
+        } catch (contactError) {
+          console.error(`Error processing contact ${contact.email}:`, contactError)
+          // Continue with next contact
         }
-      } catch (contactError) {
-        console.error('Error creating contact:', contactError)
-        // Continue with lead update even if contact creation fails
       }
+      
+      console.log(`Created ${contactsCreated} new contacts out of ${foundContacts.length} found`)
     }
 
     // Update lead search status using new function
+    const hasContacts = foundContacts.length > 0
+    const primaryEmail = hasContacts ? foundContacts[0].email : null
+    
     try {
       const { error: funcError } = await supabase.rpc('update_lead_search_status_v2', {
         p_lead_id: leadId,
-        p_new_status: foundEmail || foundWebsite ? 'encontrado' : 'nao_encontrado',
-        p_found_email: foundEmail || null,
+        p_new_status: hasContacts || foundWebsite ? 'encontrado' : 'nao_encontrado',
+        p_found_email: primaryEmail,
         p_search_domain: searchDomain
       })
 
@@ -269,10 +319,10 @@ export async function POST(request: NextRequest) {
         await supabase
           .from('leads')
           .update({
-            status_busca: foundEmail || foundWebsite ? 'encontrado' : 'nao_encontrado',
+            status_busca: hasContacts || foundWebsite ? 'encontrado' : 'nao_encontrado',
             data_ultima_busca: new Date().toISOString(),
             hunter_domain: searchDomain,
-            contato_verificado: foundEmail ? true : false
+            contato_verificado: hasContacts
           })
           .eq('id', leadId)
       }
@@ -286,7 +336,8 @@ export async function POST(request: NextRequest) {
 
     return NextResponse.json({
       success: true,
-      email: foundEmail,
+      contacts: foundContacts,
+      contactsCreated,
       website: foundWebsite,
       searchDomain: searchDomain
     })

@@ -199,19 +199,24 @@ export default function LeadsPage() {
           ? { 
               ...l, 
               organizer_website: result.website || l.organizer_website,
-              status_busca: result.email || result.website ? 'encontrado' : 'nao_encontrado',
+              status_busca: (result.contacts?.length > 0 || result.website) ? 'encontrado' : 'nao_encontrado',
               data_ultima_busca: new Date().toISOString(),
-              contato_verificado: result.email ? true : l.contato_verificado,
-              hunter_domain: result.searchDomain || l.hunter_domain
+              contato_verificado: result.contacts?.length > 0 ? true : l.contato_verificado,
+              hunter_domain: result.searchDomain || l.hunter_domain,
+              contacts: result.contacts || []
             }
           : l
       ))
 
-      showNotification('success', 
-        result.email || result.website 
-          ? 'Contatos encontrados com sucesso!' 
+      // Show notification with contact count
+      const contactCount = result.contacts?.length || 0
+      const message = contactCount > 0 
+        ? `${contactCount} contato${contactCount !== 1 ? 's' : ''} encontrado${contactCount !== 1 ? 's' : ''} e ${result.contactsCreated || 0} adicionado${result.contactsCreated !== 1 ? 's' : ''} ao banco de dados!`
+        : result.website 
+          ? 'Website encontrado, mas nenhum contato localizado'
           : 'Busca concluída, mas nenhum contato foi encontrado'
-      )
+      
+      showNotification('success', message)
 
     } catch (error) {
       console.error('Error enhancing lead:', error)

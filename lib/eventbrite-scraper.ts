@@ -220,28 +220,59 @@ export class EventbriteScraper {
                        'Local não informado'
     }
 
-    // Extract organizer name - look for "Organized by" section
+    // Extract organizer name - improved logic
     let organizerElement = ''
     
-    // Look for "Organized by" text and get the following element
-    const organizedBySection = $('*').filter((i, el) => {
-      const text = $(el).text().toLowerCase()
-      return text.includes('organized by') || text.includes('organizado por')
+    // Primary method: Look for "Organized by" pattern and extract the organizer link/text after it
+    const organizedByElements = $('*:contains("Organized by")').filter((i, el) => {
+      const text = $(el).text().trim()
+      return text.startsWith('Organized by') || text === 'Organized by'
     })
     
-    if (organizedBySection.length > 0) {
-      // Try to find the organizer name in nearby elements
-      const organizerCandidate = organizedBySection.next().text().trim() ||
-                                organizedBySection.parent().find('.eds-text-color--primary-brand').text().trim() ||
-                                organizedBySection.siblings().first().text().trim()
-      if (organizerCandidate && organizerCandidate.length < 100) { // Reasonable length check
-        organizerElement = organizerCandidate
+    if (organizedByElements.length > 0) {
+      // Get the last (most specific) element containing "Organized by"
+      const organizedByEl = organizedByElements.last()
+      
+      // Look for a link right after or within the parent element
+      const parentEl = organizedByEl.parent()
+      const organizerLink = parentEl.find('a').first()
+      
+      if (organizerLink.length > 0) {
+        organizerElement = organizerLink.text().trim()
+      } else {
+        // Try next sibling
+        const nextEl = organizedByEl.next()
+        if (nextEl.length > 0) {
+          // Check if next element is a link
+          if (nextEl.is('a')) {
+            organizerElement = nextEl.text().trim()
+          } else {
+            // Check for link within next element
+            const linkWithin = nextEl.find('a').first()
+            if (linkWithin.length > 0) {
+              organizerElement = linkWithin.text().trim()
+            } else {
+              organizerElement = nextEl.text().trim()
+            }
+          }
+        }
+      }
+      
+      // If still not found, try to extract from parent's text
+      if (!organizerElement) {
+        const fullText = parentEl.text().trim()
+        const match = fullText.match(/Organized by\s+(.+?)(?:\n|$)/i)
+        if (match) {
+          organizerElement = match[1].trim()
+        }
       }
     }
     
-    // Alternative selectors for organizer
+    // Fallback: Try alternative selectors
     if (!organizerElement) {
-      organizerElement = $('.eds-text-color--primary-brand').text().trim() ||
+      // Look for elements that commonly contain organizer info
+      organizerElement = $('a[href*="/o/"]').first().text().trim() || // Organizer profile links
+                        $('.eds-text-color--primary-brand').text().trim() ||
                         $('.organizer-name').text().trim() ||
                         $('[data-automation="organizer-name"]').text().trim() ||
                         $('.event-organizer').text().trim()
@@ -252,6 +283,7 @@ export class EventbriteScraper {
       organizerElement = organizerElement
         .replace(/^(by\s+|organizado por\s+|organized by\s+)/i, '')
         .replace(/\s+presents?$/i, '')
+        .replace(/Follow$/, '') // Remove "Follow" if it appears at the end
         .trim()
     }
     

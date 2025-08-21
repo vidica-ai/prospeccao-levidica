@@ -2,7 +2,7 @@
 
 import React from 'react'
 import { useAuth } from '@/lib/auth-context'
-import { LogOut, Sparkles, Search, Eye } from 'lucide-react'
+import { LogOut, Sparkles, Search, Eye, Building } from 'lucide-react'
 import { useRouter } from 'next/navigation'
 
 export default function WelcomePage() {
@@ -19,6 +19,10 @@ export default function WelcomePage() {
 
   const handleNavigateToLeads = () => {
     router.push('/leads')
+  }
+
+  const handleNavigateToOrganizers = () => {
+    router.push('/organizers')
   }
 
   return (
@@ -80,6 +84,14 @@ export default function WelcomePage() {
             >
               <Eye className="h-6 w-6 mr-3" />
               Ver Prospecções
+            </button>
+            
+            <button
+              onClick={handleNavigateToOrganizers}
+              className="inline-flex items-center px-8 py-4 bg-gradient-to-r from-blue-600 to-cyan-600 text-white text-lg font-semibold rounded-2xl shadow-lg hover:shadow-xl hover:from-blue-700 hover:to-cyan-700 transform hover:scale-105 transition-all duration-200 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500"
+            >
+              <Building className="h-6 w-6 mr-3" />
+              Organizadores
             </button>
           </div>
         </div>
